@@ -61,6 +61,10 @@ function Helpers:StringContains(str, sub)
 end
 
 
+function Helpers.StringContainsTwo(input, search)
+    return string.find(input, search) ~= nil
+end
+
 -- Retrieves the value of a specified property from an object or returns a default value if the property doesn't exist.
 ---@param obj           - The object from which to retrieve the property value.
 ---@param propertyName  - The name of the property to retrieve.
@@ -73,5 +77,42 @@ function Helpers:GetPropertyOrDefault(obj, propertyName, defaultValue)
     else
         return defaultValue
     end
+end
+
+-- Tries to get the value of an entities component
+---@param uuid              string      - The entity UUID to check
+---@param previousComponent value       - component of previous iteration
+---@param components        table       - Sorted list of component path
+---@return Value                        - Returns the value of a field within a component
+---@example
+-- Entity:TryGetEntityValue("UUID", nil, {"ServerCharacter, "PlayerData", "HelmetOption"})
+-- nil as previousComponent on first call because it iterates over this parameter during recursion
+function Helpers.TryGetEntityValue(uuid, previousComponent, components)
+    local entity = Ext.Entity.Get(uuid)
+    if #components == 1 then -- End of recursion
+        if not previousComponent then
+            local value = Helpers:GetPropertyOrDefault(entity, components[1], nil)
+            return value
+        else
+            local value = Helpers:GetPropertyOrDefault(previousComponent, components[1], nil)
+            return value
+        end
+    end
+
+    local currentComponent
+    if not previousComponent then -- Recursion
+        currentComponent = Helpers:GetPropertyOrDefault(entity, components[1], nil)
+        -- obscure cases
+        if not currentComponent then
+            return nil
+        end
+    else
+        currentComponent = Helpers:GetPropertyOrDefault(previousComponent, components[1], nil)
+    end
+
+    table.remove(components, 1)
+
+    -- Return the result of the recursive call
+    return Helpers.TryGetEntityValue(uuid, currentComponent, components)
 end
 

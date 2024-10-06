@@ -1,65 +1,98 @@
-local ent = Ext.Entity.Get("fa026ba4-2758-51e3-ceaa-26229f8b6b59")
+local ent = _CC()
 
 local w = Ext.IMGUI.NewWindow("Jelly")
-local testText = w:AddText("Test")
-local sep = w:AddSeparatorText("")
-local tabbar = w:AddTabBar("")
+--local tabbar = w:AddTabBar("")
 
 Jelly = {}
 
-local function GenerateInputScalarsFromData(parent, data)
-    local inputs = {}
-    if type(data) == "Table" then
-        for i,val in ipairs(data) do
-            local vec3 = parent:AddInputScalar("", val)
-            vec3.SameLine = true
-            table.insert(inputs, vec3)
-        end
-    elseif type(data) == "Number" then
-        local num = parent:AddInputScalar("", data)
-        table.insert(inputs, num)
-    end
-
-    return inputs
+local function GetMaterialInstance(ent, path)
+    local slot = path[1]
+    local subVisual = path[2]
+    local material = path[3]
+    return Helpers.TryGetEntityValue(ClientEntityHelper:GetUuid(ent), nil, {"ClientEquipmentVisuals", "Equipment", slot, "SubVisuals", subVisual, "Visual", "Visual", "ObjectDescs", material, "Renderable", "ActiveMaterial", "MaterialInstance"})
 end
 
-local function GenerateParameterAreas(parent, params)
-    for _,param in pairs(params) do
-        local parTree = parent:AddTree(param.ParameterName)
-        local basevalTree = parTree:AddTree("BaseValue")
-        local valueTree = parTree:AddTree("Value")
-        GenerateInputScalarsFromData(basevalTree, param.BaseValue)
-        GenerateInputScalarsFromData(valueTree, param.Value)
+function GetActiveMaterial(ent, path)
+    local slot = path[1]
+    local subVisual = path[2]
+    local material = path[3]
+    return Helpers.TryGetEntityValue(ClientEntityHelper:GetUuid(ent), nil, {"ClientEquipmentVisuals", "Equipment", slot, "SubVisuals", subVisual, "Visual", "Visual", "ObjectDescs", material, "Renderable", "ActiveMaterial"})
+end
+
+
+
+local function GetRenderable(ent, path)
+    local slot = path[1]
+    local subVisual = path[2]
+    local material = path[3]
+    return Helpers.TryGetEntityValue(ClientEntityHelper:GetUuid(ent), nil, {"ClientEquipmentVisuals", "Equipment", slot, "SubVisuals", subVisual, "Visual", "Visual", "ObjectDescs", material, "Renderable"})
+end
+
+
+local function HandleParameterData(parent, ent, path, data)
+    if type(data) == "table" then
+        if #data > 1 then
+            local colPicker = parent:AddColorEdit("", data)
+            --colPicker.Size = {100,100}
+            colPicker.OnChange = function()
+                Ext.IO.SaveFile("Jelly/active_material.json", Ext.DumpExport(GetActiveMaterial(ent, path)))
+                GetActiveMaterial(ent, path).SetVector3(colPicker.Color)
+                print("materialInctance")
+                _D(GetMaterialInstance(ent, path))
+                --data[1] = colPicker.Color[1]
+                --data[2] = colPicker.Color[2]
+                --data[3] = colPicker.Color[3]
+                -- No [4] since alpha doesn't exist in vec3 params
+            end
+        end
+    else
+        local slider = parent:AddSlider("", data)
+        slider.OnChange = function()
+            GetActiveMaterial(ent, path).SetScalar(slider.Value)
+            --data = slider.Value
+        end
+    end
+end
+
+
+local function GenerateParameterAreas(parent, ent, path)
+    local materialInstance = GetMaterialInstance(ent, path)
+    local paramTabBar = parent:AddTabBar("")
+    for paramTypeName, paramType in pairs(materialInstance.Parameters) do
+        -- Check if the name of the parameter type contains "Scalar"
+        if Helpers.StringContainsTwo(paramTypeName, "Scalar") or Helpers.StringContainsTwo(paramTypeName, "Vector3") then
+            local paramTab = paramTabBar:AddTabItem(tostring(paramTypeName))
+            for _, param in pairs(paramType) do
+                local parTree = paramTab:AddTree(param.ParameterName)
+                local basevalTree = parTree:AddTree("BaseValue")
+                local valueTree = parTree:AddTree("Value")
+                HandleParameterData(basevalTree, ent, path, param.BaseValue) -- don't pass param-BaseValue, pass Entitty and path to circumvent Lifetime issues
+                HandleParameterData(valueTree, ent, path, param.Value)
+            end
+        end
     end
 end
 
 function Jelly.GenerateArmorAreas()
-    for equipment,slot in pairs(ent.ClientEquipmentVisuals.Equipment) do
-        if slot.Item ~= null then
-            local eq = tabbar:AddTabItem(ClientItemHelper:GetItemName(slot.Item))
-            
+    for slot,slotContent in pairs(ent.ClientEquipmentVisuals.Equipment) do
+        if slotContent.Item ~= null then
+            --local eq = tabbar:AddTabItem(ClientItemHelper:GetItemName(slotContent.Item))
+            local eq = w:AddCollapsingHeader(ClientItemHelper:GetItemName(slotContent.Item))
+
             local visualTabBar = eq:AddTabBar("")
-            for _,subvis in pairs(slot.SubVisuals) do
+            for subVisual,subVisualContent in pairs(slotContent.SubVisuals) do
                 local visCount = 1
                 local vis = visualTabBar:AddTabItem("Visual" .. tostring(visCount))
                 visCount = visCount + 1
 
                 local materialTabBar = vis:AddTabBar("")
-                for _,material in pairs(subvis.Visual.Visual.ObjectDescs) do
-                    local materialInstance = material.Renderable.ActiveMaterial.MaterialInstance
+                for material,materialContent in pairs(subVisualContent.Visual.Visual.ObjectDescs) do
+                    local materialInstance = materialContent.Renderable.ActiveMaterial.MaterialInstance
                     local mat = materialTabBar:AddTabItem(materialInstance.Name)
-                    local maybeLOD = mat:AddText("LOD Level: " .. tostring(material.field_8))
 
-                    local paramTabBar = mat:AddTabBar("")
-                    local parameters = materialInstance.Parameters
-                    if parameters.ScalarParameters[1] then
-                        local scalarTab = paramTabBar:AddTabItem("ScalarParameters")
-                        GenerateParameterAreas(scalarTab, materialInstance.Parameters.Vector3Parameters)
-                    end
-                    if parameters.Vector3Parameters[1] then
-                        local vector3Tab = paramTabBar:AddTabItem("Vector3Parameters")
-                        GenerateParameterAreas(vector3Tab, materialInstance.Parameters.Vector3Parameters)
-                    end
+                    mat:AddSeparator()
+                    local maybeLOD = mat:AddText("LOD Level: " .. tostring(materialContent.field_8))
+                    GenerateParameterAreas(mat, ent, {slot,subVisual,material})
                 end
             end
         end
