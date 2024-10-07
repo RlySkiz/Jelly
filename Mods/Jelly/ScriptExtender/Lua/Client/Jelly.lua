@@ -166,6 +166,7 @@ function Jelly:HandleParameterData(area, parent, path, data)
     else
         local slider = parent:AddSlider("", data)
         slider.OnChange = function()
+            _D(slider.Value)
             self.GetActiveMaterial(area, path):SetScalar(slider.ParentElement.ParentElement.Label, slider.Value[1])
             --data = slider.Value
         end
@@ -182,10 +183,13 @@ function Jelly:GenerateParameterAreas(area, parent, path)
             local paramTab = paramTabBar:AddTabItem(tostring(paramTypeName))
             for _, param in pairs(paramType) do
                 local parTree = paramTab:AddTree(param.ParameterName)
-                local basevalTree = parTree:AddTree("BaseValue")
-                local valueTree = parTree:AddTree("Value")
-                self:HandleParameterData(area, basevalTree, path, param.BaseValue)
-                self:HandleParameterData(area, valueTree, path, param.Value)
+                self:HandleParameterData(area, parTree, path, param.Value)
+
+                -- Reenable if we need both, BaseValue and Value
+                -- local basevalTree = parTree:AddTree("BaseValue")
+                -- local valueTree = parTree:AddTree("Value")
+                -- self:HandleParameterData(area, basevalTree, path, param.BaseValue)
+                -- self:HandleParameterData(area, valueTree, path, param.Value)
             end
         end
     end
