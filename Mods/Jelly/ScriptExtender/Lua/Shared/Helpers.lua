@@ -116,3 +116,32 @@ function Helpers.TryGetEntityValue(uuid, previousComponent, components)
     return Helpers.TryGetEntityValue(uuid, currentComponent, components)
 end
 
+Helpers.Character = {}
+---@return EntityHandle|nil
+function Helpers.Character:GetLocalControlledEntity()
+    if Ext.IsServer() then
+        return Ext.Entity.Get(Osi.GetHostCharacter())
+    else
+        for _, entity in pairs(Ext.Entity.GetAllEntitiesWithComponent("ClientControl")) do
+            if entity.UserReservedFor.UserID == 1 then
+                return entity
+            end
+        end
+    end
+end
+
+Helpers.Timer = {}
+---Ext.OnNextTick, but variable ticks
+---@param ticks integer
+---@param fn function
+function Helpers.Timer:OnTicks(ticks, fn)
+    local ticksPassed = 0
+    local eventID
+    eventID = Ext.Events.Tick:Subscribe(function()
+        ticksPassed = ticksPassed + 1
+        if ticksPassed >= ticks then
+            fn()
+            Ext.Events.Tick:Unsubscribe(eventID)
+        end
+    end)
+end
