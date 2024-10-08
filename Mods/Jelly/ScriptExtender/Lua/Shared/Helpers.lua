@@ -145,3 +145,18 @@ function Helpers.Timer:OnTicks(ticks, fn)
         end
     end)
 end
+
+function Helpers.IsScalar(v) -- by Norbyte
+    local ty = Ext.Types.GetValueType(v)
+    return ty == "nil" or ty == "string" or ty == "number" or ty == "boolean" or ty == "Enum" or ty == "Bitfield"
+end
+
+
+-- Return siblings of an element
+function Helpers.GetSiblings(elem)
+    return elem.ParentElement and elem.ParentElement.Children or {}
+end
+
+function Helpers.GetLastCharacter(str)
+    return str:sub(-1)
+end

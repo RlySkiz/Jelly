@@ -1,3 +1,4 @@
+---@diagnostic disable: redefined-local, param-type-mismatch
 -- local ent = _CC()
 
 --local tabbar = w:AddTabBar("")
@@ -152,29 +153,96 @@ end
 
 --#endregion
 
-function Jelly:HandleParameterData(area, parent, path, data)
-    if type(data) == "table" then
-        if #data > 1 then
-            local colEdit = parent:AddColorEdit("", data)
-            colEdit.NoAlpha = true
-            colEdit.OnChange = function()
-                -- Ext.IO.SaveFile("Jelly/active_material.json", Ext.DumpExport(GetActiveMaterial(ent, path)))
-                local r,g,b = colEdit.Color[1], colEdit.Color[2], colEdit.Color[3]
-                self:GetActiveMaterial(area, path):SetVector3(colEdit.ParentElement.ParentElement.Label, {r,g,b})
-            end
-        end
-    else
-        local slider = parent:AddSlider("", data)
-        slider.OnChange = function()
-            _D(slider.Value)
-            self.GetActiveMaterial(area, path):SetScalar(slider.ParentElement.ParentElement.Label, slider.Value[1])
-            --data = slider.Value
+function DumpS(tbl)
+    if type(tbl) ~= "table" then
+        print(tbl)  -- If it's not a table, just print the value directly
+        return
+    end
+    
+    print("{")
+    for key, value in pairs(tbl) do
+        if type(value) == "table" then
+            print("  " .. tostring(key) .. " = { ... },")  -- Indicate that it's a nested table without dumping its contents
+        else
+            print("  " .. tostring(key) .. " = " .. tostring(value) .. ",")
         end
     end
+    print("}")
+end
+
+function Jelly:UpdateParameterEditorPath(element)
+
+end
+
+-- Create and handle updating of EditorElements (Sliders/Colorwheels) across multiple LOD
+function Jelly:HandleParameterData(area, Materials, currentMaterial, parent, path, data)
+    local isUpdating = false
+    -- Update parameter across all LOD levels for the current material
+    local function UpdateAllLODParameters(partype, editorVal)
+        if isUpdating then
+            return
+        end
+        isUpdating = true
+        for uuid, Material in pairs(Materials) do
+            if uuid == currentMaterial then
+                for LOD, LODTab in pairs(Material) do -- Material = {Bar = tabbar, LOD0 = LOD0Tab, LOD1 = LOD1Tab, ...}
+                    if LOD ~= Material.Bar then -- To handle genOrGetMainMatBar recursion
+                        local parameterTabs = LODTab.Children[1].Children -- Get the actual parameterTabs - Children[1] is the ParameterTabBar from GenerateParameterAreas()
+                        for _, parameterTab in pairs(parameterTabs) do -- Go through all parameterTabs within this LOD tab
+                            if parameterTab.Label == parent.ParentElement.Label then -- Gives .OnChange only access to its own parameterTab Type e.g. "ScalarParameters"
+                                for _,parameter in pairs(parameterTab.Children) do -- Go through all parameters within the parameter type node
+                                    if parameter.Label == parent.Label then -- Gives .OnChange only access to a parameter with the same name as its own elements' .ParentElement
+                                        if partype == "Vector3" then
+                                            local r, g, b = editorVal[1], editorVal[2], editorVal[3]
+                                            local val = {r, g, b}
+                                            -- _P("Updating Vector3 " .. parameter.Label .. " to " .. val .. " at " .. LOD)
+                                            self:GetActiveMaterial(area, path):SetVector3(parameter.Label, val)
+                                            parameter.Children[1].Color = editorVal
+                                            parameter.Children[1].OnChange()
+
+                                        elseif partype == "Scalar" then
+                                            local val = editorVal[1]
+                                            -- _P("Updating Scalar " .. parameter.Label .. " to " .. val .. " at " .. LOD)
+                                            self:GetActiveMaterial(area, path):SetScalar(parameter.Label, val)
+                                            parameter.Children[1].Value = editorVal
+                                            parameter.Children[1].OnChange()
+                                        end 
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        isUpdating = false
+    end
+
+    local function CreateUIElementAndHandleChange(data, parent)
+        if type(data) == "table" and #data > 1 then
+            -- If data is a table with multiple values, treat it as a color edit element
+            local editor = parent:AddColorEdit("", data)
+            editor.NoAlpha = true
+            editor.OnChange = function()
+                if not isUpdating then
+                    UpdateAllLODParameters("Vector3",editor.Color)
+                end
+            end
+        else
+            -- Otherwise, treat data as a scalar and create a slider
+            local editor = parent:AddSlider("", data)
+            editor.OnChange = function()
+                if not isUpdating then
+                    UpdateAllLODParameters("Scalar",editor.Value)
+                end
+            end
+        end
+    end
+    CreateUIElementAndHandleChange(data, parent)
 end
 
 
-function Jelly:GenerateParameterAreas(area, parent, path)
+function Jelly:GenerateParameterAreas(area, Materials, currentMaterial, parent, path)
     local materialInstance = self:GetMaterialInstance(area, path)
     local paramTabBar = parent:AddTabBar("")
     for paramTypeName, paramType in pairs(materialInstance.Parameters) do
@@ -183,7 +251,7 @@ function Jelly:GenerateParameterAreas(area, parent, path)
             local paramTab = paramTabBar:AddTabItem(tostring(paramTypeName))
             for _, param in pairs(paramType) do
                 local parTree = paramTab:AddTree(param.ParameterName)
-                self:HandleParameterData(area, parTree, path, param.Value)
+                self:HandleParameterData(area, Materials, currentMaterial, parTree, path, param.Value)
 
                 -- Reenable if we need both, BaseValue and Value
                 -- local basevalTree = parTree:AddTree("BaseValue")
@@ -197,25 +265,46 @@ end
 
 function Jelly:GenerateMaterials(area, parent, slotIteration, visualIteration, materialHolder)
     local slotIteration = slotIteration or nil
-    local materialTabBar = parent:AddTabBar("")
-    local LOD0Mats = {}
-    for material,materialContent in pairs(materialHolder) do
-        local mat
-        local materialInstance = materialContent.Renderable.ActiveMaterial.MaterialInstance
-        if LOD0Mats[materialInstance.Name] then
-            mat = materialTabBar:AddTabItem("Material " .. tostring(LOD0Mats[materialInstance.Name]) .. "_LOD" .. tostring(materialContent.field_8))
-        else
-            mat = materialTabBar:AddTabItem("Material " .. tostring(material))
-        end
-        LOD0Mats[materialInstance.Name] = material
+    local materialsBar = parent:AddTabBar("")
+    local Materials = {}
+    local matCounter = 0
 
-        mat:AddText("MaterialInstance:")
-        local matName = mat:AddInputText("")
-        matName.Text = materialInstance.Name
-        matName.SameLine = true
-        self:GenerateParameterAreas(area, mat, {slotIteration, visualIteration, material})
+    for material, materialContent in pairs(materialHolder) do
+        local materialInstance = materialContent.Renderable.ActiveMaterial.MaterialInstance
+        local materialBar
+        local lod
+
+        -- Function to get or create the main material tab bar
+        local function genOrGetMainMatBar(parent, uuid)
+            if uuid and Materials[uuid] then
+                return Materials[uuid].Bar -- If it exists, return
+            else
+                matCounter = matCounter + 1
+                local mainMatTabItem = parent:AddTabItem("Material " .. tostring(matCounter))
+                mainMatTabItem.IDContext = Ext.Math.Random()
+
+                mainMatTabItem:AddText("MaterialInstance:")
+                local matUuidInput = mainMatTabItem:AddInputText("")
+                matUuidInput.Text = materialInstance.Name
+                matUuidInput.SameLine = true
+
+                local newMaterialBar = mainMatTabItem:AddTabBar("")
+                newMaterialBar.IDContext = Ext.Math.Random()
+                Materials[uuid] = {Bar = newMaterialBar}
+                return newMaterialBar
+            end
+        end
+
+        materialBar = genOrGetMainMatBar(materialsBar, materialInstance.Name)
+        lod = materialBar:AddTabItem("LOD " .. tostring(materialContent.field_8))
+        lod.IDContext = Ext.Math.Random()
+
+        Materials[materialInstance.Name]["LOD"..materialContent.field_8] = lod -- Materials[uuid][LOD]["LODInstance"] = imguiHandle of the LOD
+
+        self:GenerateParameterAreas(area, Materials, materialInstance.Name, lod, {slotIteration, visualIteration, material})
     end
 end
+
 
 function Jelly:GenerateContent(area)
     local contentArea = self.Window:AddCollapsingHeader(area)
@@ -229,6 +318,7 @@ function Jelly:GenerateContent(area)
                 for subVisual,subVisualEntity in pairs(slotContent.SubVisuals) do
                     Ext.IO.SaveFile("Jelly/active_material.json", Ext.DumpExport(subVisualEntity:GetAllComponents()))
                     local materialParent = visualTabBar:AddTabItem("Visual " .. tostring(subVisual))
+                    materialParent.IDContext = Ext.Math.Random()
 
                     materialHolder = subVisualEntity.Visual.Visual.ObjectDescs
                     self:GenerateMaterials(area, materialParent, slot, subVisual, materialHolder)
@@ -236,16 +326,27 @@ function Jelly:GenerateContent(area)
             end
         end
     elseif area == "Entity" then
-        for attachment,attachmentContent in pairs(self.Entity.Visual.Visual.Attachments) do
-            Ext.IO.SaveFile("Jelly/attachment.json", Ext.DumpExport(attachmentContent))
-            if attachmentContent.Visual ~= null then
-                local visualEntity = attachmentContent.Visual.VisualEntity
-                -- Ext.IO.SaveFile("Jelly/visual.json", Ext.DumpExport(visualEntity:GetAllComponents()))
-                local materialParent = contentArea:AddTree(visualEntity.Visual.Visual.VisualResource.Slot)
+        if self.Entity.Visual then
+            for attachment,attachmentContent in pairs(self.Entity.Visual.Visual.Attachments) do
+                Ext.IO.SaveFile("Jelly/attachment.json", Ext.DumpExport(attachmentContent))
+                if attachmentContent.Visual ~= null then
+                    local visualEntity = attachmentContent.Visual.VisualEntity
+                    local visualResource = visualEntity.Visual.Visual.VisualResource
+                    -- Ext.IO.SaveFile("Jelly/visual.json", Ext.DumpExport(visualEntity:GetAllComponents()))
+                    if visualResource ~= null then
+                        local materialParent = contentArea:AddTree(visualResource.Slot)
+                        materialParent.IDContext = Ext.Math.Random()
 
-                materialHolder = attachmentContent.Visual.ObjectDescs
-                self:GenerateMaterials(area, materialParent, nil, attachment, materialHolder)
+                        materialHolder = attachmentContent.Visual.ObjectDescs
+                        self:GenerateMaterials(area, materialParent, nil, attachment, materialHolder)
+                    else
+                        _P("[Jelly] VisualResource = null found")
+                        Ext.IO.SaveFile("Jelly/visualEntity.json", Ext.DumpExport(visualEntity:GetAllComponents()))
+                    end
+                end
             end
+        else
+            _P("[Jelly] No Entity Visual")
         end
     end
 end
@@ -253,20 +354,22 @@ end
 
 -----------------------------------------------------------------------------------------------
 
-local acquireSubHandle -- limit to one instance
-Ext.Entity.OnCreate("ClientControl", function(entity, ct, c)
-    if acquireSubHandle then
-        Ext.Events.Tick:Unsubscribe(acquireSubHandle)
-    end
-    acquireSubHandle = Helpers.Timer:OnTicks(10, function()
-        -- grab what's currently selected, in case it's changed since last ClientControl
-        local entity
-        entity = Helpers.Character:GetLocalControlledEntity()
-        Jelly:GetOrCreate(entity)
-    end)
-end)
+
 
 local function OnSessionLoaded()
     LoadAllPremadeColors()
+
+    local acquireSubHandle -- limit to one instance
+    Ext.Entity.OnCreate("ClientControl", function(entity, ct, c)
+        if acquireSubHandle then
+            Ext.Events.Tick:Unsubscribe(acquireSubHandle)
+        end
+        acquireSubHandle = Helpers.Timer:OnTicks(10, function()
+            -- grab what's currently selected, in case it's changed since last ClientControl
+            local entity
+            entity = Helpers.Character:GetLocalControlledEntity()
+            Jelly:GetOrCreate(entity)
+        end)
+    end)
 end
 Ext.Events.SessionLoaded:Subscribe(OnSessionLoaded)
