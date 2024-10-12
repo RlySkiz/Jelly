@@ -83,7 +83,7 @@ end
 ---@param uuid              string      - The entity UUID to check
 ---@param previousComponent value       - component of previous iteration
 ---@param components        table       - Sorted list of component path
----@return Value                        - Returns the value of a field within a component
+---@return any                        - Returns the value of a field within a component
 ---@example
 -- Entity:TryGetEntityValue("UUID", nil, {"ServerCharacter, "PlayerData", "HelmetOption"})
 -- nil as previousComponent on first call because it iterates over this parameter during recursion

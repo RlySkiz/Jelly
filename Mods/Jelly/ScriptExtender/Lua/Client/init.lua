@@ -14,6 +14,20 @@ ClientItemHelper.__index = ClientItemHelper
 ClientEquipmentHelper = {}
 ClientEquipmentHelper.__index = ClientEquipmentHelper
 
+ClientVisualHelper = {}
+ClientVisualHelper.__index = ClientVisualHelper
+
+
+
+JellyUIHelper = {}
+JellyUIHelper.__index = JellyUIHelper
+
+JellyUI = {}
+JellyUI.__index = JellyUI
+
+
+
+
 
 -- this is used so often that I wanted to use a shortcut
 function _CC()

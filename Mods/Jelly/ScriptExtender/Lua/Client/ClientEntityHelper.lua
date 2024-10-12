@@ -10,6 +10,14 @@ end
 
 
 ---@param entity EntityHandle
+---@return string name
+function ClientEntityHelper:GetName(entity)
+    return Ext.Loca.GetTranslatedString(entity.DisplayName.NameKey.Handle.Handle)
+end 
+
+
+
+---@param entity EntityHandle
 ---@return table<ExtComponentType,BaseComponent>
 function ClientEntityHelper:GetVisual(entity) 
     return entity.Visual.Visual
