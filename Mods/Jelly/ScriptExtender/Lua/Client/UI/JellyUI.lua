@@ -1,41 +1,46 @@
 ---@diagnostic disable: redefined-local, param-type-mismatch
--- local ent = _CC()
-
---local tabbar = w:AddTabBar("")
 JellyUI = {
     Instances = {}
 }
--- JellyUI.__index = JellyUI
-
 function JellyUI:New(entity)
     local instance = setmetatable({
+        Entity = entity,
         Window = nil,
-        Entity = entity
+        WindowPos = nil,
+        WindowSize = nil,
+        Colors = {},
+        Visuals = {
+            VisualArea = { -- e.g. "Entity" or "Equipment" UI Wrapper
+                Visuals = {}
+            },
+        },
+        Materials = {},
     },JellyUI)
     self.__index = self
     return instance
 end
 
-function JellyUI:GetOrCreate(entity)
-    if self.Instances[entity.Uuid.EntityUuid] ~= nil then
-        return self.Instances[entity.Uuid.EntityUuid]
-    end
-
-    local i = self:New(entity)
-    i:Init(entity.Uuid.EntityUuid)
-    return i
-end
 
 function JellyUI:Init(uuid)
     self.Instances[uuid] = self
     self.Window = Ext.IMGUI.NewWindow(ClientEntityHelper:GetName(self.Entity))
     self.Window.IDContext = uuid
-    self.Window:SetSize({500, 500}, "FirstUseEver")
+    self.WindowPos = {0,0}
+    self.WindowSize = {500, 500}
+    self.Window:SetPos(self.WindowPos, "Always")
+    self.Window:SetSize(self.WindowSize, "Always")
     self.Window.Closeable = true
     
-    self:PremadeColors()
+    self.Colors = JellyColors:New(self)
+    self.Colors.Window.IDContext = uuid .. "_Colors"
+    self.Colors.Window:SetPos({self.WindowPos[1]+self.WindowSize[1], self.WindowPos[2]}, "Always")
+    self.Colors.Window:SetSize({300, 250}, "FirstUseEver")
+    self.Colors.Window.Closeable = true
+
+    -- self:PremadeColors()
     self:GenerateContent("Entity")
     self:GenerateContent("Equipment")
+
 
     self.Window.OnClose = function (e)
         for i,instance in ipairs(self.Instances) do
@@ -86,30 +91,57 @@ local function GenerateAndReturnAllPremadeColors()
     LoadAllPremadeColors()
     return preMadeColors
 end
---#endregion
 
-function JellyUI:PremadeColors()
+JellyColors = {
+    Instances = {}
+}
+function JellyColors:New()
+    local instance = setmetatable({
+        Window = Ext.IMGUI.NewWindow("Colors"),
+        Types = {},
+    },JellyColors)
+    self.__index = self
+
+    instance:PremadeColors()
+    return instance
+end
+
+function JellyUI:GetOrCreate(entity)
+    if self.Instances[entity.Uuid.EntityUuid] ~= nil then
+        return self.Instances[entity.Uuid.EntityUuid]
+    end
+
+    local i = self:New(entity)
+    i:Init(entity.Uuid.EntityUuid)
+    return i
+end
+
+function JellyColors:PremadeColors()
     local colorTable = self.Window:AddTable("",1)
     -- colorTable.ScrollY = true
     for type,content in pairs(preMadeColors) do
         local colorCell = colorTable:AddRow():AddCell()
         local typeTree = colorCell:AddTree(type)
-        local typeTable = typeTree:AddTable("", 20)
+        local columns = 10
+        local typeTable = typeTree:AddTable("", columns)
         -- typeTable.ScrollY = true
         local typeRow = typeTable:AddRow()
+        self.Types[type] = {}
         for i,uuid in ipairs(content) do
             local color = Ext.StaticData.Get(uuid, type)
             -- Get name from charactercreationskincolors.lsx, and color from _merged with material presets - ask Astra 
             local name = Ext.Loca.GetTranslatedString(color.DisplayName.Handle.Handle)
-            if i % 20 == 0 then
+            if i % columns == 1 then -- Create a new row if the current iteration is divisible by the set column count and equals
                 typeRow = typeTable:AddRow()
             end
             local colEdit = typeRow:AddCell():AddColorEdit("")
             colEdit.NoInputs = true
             colEdit.Color = color.UIColor
+            table.insert(self.Types[type], colEdit)
         end
     end
 end
+--#endregion
 
 --#region Material Handling
 local function GetWornEquipmentCount(ent)
@@ -178,7 +210,7 @@ function JellyUI:HandleParameterData(area, Materials, currentMaterial, parent, p
                                         elseif partype == "Scalar" then
                                             local val = editorVal[1]
                                             -- _P("Updating Scalar " .. parameter.Label .. " to " .. val .. " at " .. LOD)
-                                            self:GetActiveMaterial(self.Entity, area, path):SetScalar(parameter.Label, val)
+                                            ClientVisualHelper:GetActiveMaterial(self.Entity, area, path):SetScalar(parameter.Label, val)
                                             parameter.Children[1].Value = editorVal
                                             --parameter.Children[1].OnChange()
                                         end 
@@ -290,22 +322,30 @@ end
 
 function JellyUI:GenerateContent(area)
     local contentArea = self.Window:AddCollapsingHeader(area)
+    self.Visuals.VisualArea[area] = {Area = contentArea, Visuals = {}}
     local materialHolder
 
     if area == "Equipment" then
-        for slot,slotContent in pairs(self.Entity.ClientEquipmentVisuals.Equipment) do
-            if slotContent.Item ~= null then
-                local eq = contentArea:AddTree(ClientItemHelper:GetItemName(slotContent.Item))
-                local visualTabBar = eq:AddTabBar("")
-                for subVisual,subVisualEntity in pairs(slotContent.SubVisuals) do
-                    Ext.IO.SaveFile("Jelly/active_material.json", Ext.DumpExport(subVisualEntity:GetAllComponents()))
-                    local materialParent = visualTabBar:AddTabItem("Visual " .. tostring(subVisual))
-                    materialParent.IDContext = Ext.Math.Random()
+        if self.Entity.ClientEquipmentVisuals then
+            for slot,slotContent in pairs(self.Entity.ClientEquipmentVisuals.Equipment) do
+                if slotContent.Item ~= null then
+                    local eq = contentArea:AddTree(ClientItemHelper:GetItemName(slotContent.Item))
+                    self.Visuals.VisualArea[area].Visuals[slot] = {Item = eq, SubVisuals = {}}
+                    local visualTabBar = eq:AddTabBar("")
+                    for subVisual,subVisualEntity in pairs(slotContent.SubVisuals) do
+                        Ext.IO.SaveFile("Jelly/active_material.json", Ext.DumpExport(subVisualEntity:GetAllComponents()))
+                        local materialParent = visualTabBar:AddTabItem("Visual " .. tostring(subVisual))
+                        materialParent.IDContext = Ext.Math.Random()
 
-                    materialHolder = subVisualEntity.Visual.Visual.ObjectDescs
-                    self:GenerateMaterials(area, materialParent, slot, subVisual, materialHolder)
+                        materialHolder = subVisualEntity.Visual.Visual.ObjectDescs
+                        self.Visuals.VisualArea[area].Visuals[slot].SubVisuals[subVisual] = {Visual = materialParent, MaterialHolder = materialHolder}
+                        self:GenerateMaterials(area, materialParent, slot, subVisual, materialHolder)
+                    end
                 end
             end
+        else
+            _P("[Jelly] No Equipment Visuals")
+            -- Mods.Jelly._CC().Visual.Visual.VisualEntity.Visual.Visual.VisualEntity:GetAllComponents()
         end
     elseif area == "Entity" then
         if self.Entity.Visual then
@@ -336,6 +376,30 @@ end
 
 -----------------------------------------------------------------------------------------------
 
+local function giveNextFileName(wishFileName)
+    local count = 1
+
+    -- Strip the .json extension if it exists
+    local baseName, ext = wishFileName:match("^(.-)(%.json)$")
+    if not baseName then
+        -- If the file doesn't end with .json, assume the whole input is the base name
+        baseName = wishFileName
+        ext = ".json"
+    end
+
+    local function giveNextFileNameRecurse(currentFileName)
+        -- Check if the file exists
+        if Ext.IO.LoadFile(currentFileName) == nil then
+            return currentFileName
+        else
+            -- Recursively call with an incremented count
+            count = count + 1
+            return giveNextFileNameRecurse(baseName .. "_" .. tostring(count) .. ext)
+        end
+    end
+
+    return giveNextFileNameRecurse(wishFileName)
+end
 
 
 local function OnSessionLoaded()
@@ -349,9 +413,26 @@ local function OnSessionLoaded()
         acquireSubHandle = Helpers.Timer:OnTicks(10, function()
             -- grab what's currently selected, in case it's changed since last ClientControl
             local entity
-            entity = Helpers.Character:GetLocalControlledEntity()
+            entity = Helpers.GetLocalControlledEntity()
             JellyUI:GetOrCreate(entity)
         end)
     end)
+
+    -- Kaz Sound Test
+
+    local allSounds = {}
+    for _, sound in pairs(Ext.Resource.GetAll("Sound")) do
+        local soundToDump = Ext.Resource.Get(sound, "Sound")
+        allSounds[sound] = soundToDump
+    end
+    Ext.IO.SaveFile("Sounds/SoundDump.json", Ext.DumpExport(allSounds))
+
+    local allVoiceBarks = {}
+    for _, voiceBark in pairs(Ext.Resource.GetAll("VoiceBark")) do
+        local voiceBarkToDump = Ext.Resource.Get(voiceBark, "VoiceBark")
+        allVoiceBarks[voiceBark] = voiceBarkToDump
+    end
+    Ext.IO.SaveFile("VoiceBarks/VoiceBarksDump.json", Ext.DumpExport(allVoiceBarks))
+
 end
 Ext.Events.SessionLoaded:Subscribe(OnSessionLoaded)

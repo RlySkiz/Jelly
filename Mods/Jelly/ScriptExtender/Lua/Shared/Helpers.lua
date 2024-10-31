@@ -116,9 +116,8 @@ function Helpers.TryGetEntityValue(uuid, previousComponent, components)
     return Helpers.TryGetEntityValue(uuid, currentComponent, components)
 end
 
-Helpers.Character = {}
 ---@return EntityHandle|nil
-function Helpers.Character:GetLocalControlledEntity()
+function Helpers.GetLocalControlledEntity()
     if Ext.IsServer() then
         return Ext.Entity.Get(Osi.GetHostCharacter())
     else
@@ -159,4 +158,43 @@ end
 
 function Helpers.GetLastCharacter(str)
     return str:sub(-1)
+end
+
+Visuals = {}
+Helpers.__index = Helpers
+-- returns the VisualSet.Slots
+--@param  uuid string - uuid of the character possibly wearing a visual
+--@return uuid string - uuid of the visual, else nil
+function Visuals:getSlots(character)
+
+    _P("Getting slots for ".. character)
+
+    local entity = Ext.Entity.Get(character)
+    local resource = entity.ServerCharacter.Template.CharacterVisualResourceID
+    local slots = Ext.Resource.Get(resource, "CharacterVisual").VisualSet.Slots
+    return slots
+    
+end
+
+---@param character string - uuid of the character
+---@param uuid string - uuid to remove
+function Visuals:removeVisualSetSlot(character)
+
+    local slots = Visuals:getSlots(character)
+    local entity = Ext.Entity.Get(character)
+    local removed = {}
+
+    for i, entry in pairs(slots) do
+        _P(entry.VisualResource)
+
+        if VISUAL_SET_SLOT[entry.VisualResource] then 
+            _P("match found")
+            entry.VisualResource = ""
+            
+            table.insert(removed, {uuid = entry.VisualResource, index = i})
+        end
+    end
+
+    --UserVars:AssignSlot(character,removed)
+    entity:Replicate("GameObjectVisual")
 end
